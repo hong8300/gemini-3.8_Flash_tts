@@ -1,0 +1,12 @@
+# Secrets
+.env
+
+# Local environment
+.venv/
+.envrc
+.claude/
+__pycache__/
+.DS_Store
+
+# Generated audio
+output/

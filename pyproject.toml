@@ -1,0 +1,10 @@
+[project]
+name = "gemini-3-8-flash-tts"
+version = "0.1.0"
+description = "Test script for generating WAV with Gemini 3.8 Flash TTS"
+requires-python = ">=3.11"
+dependencies = [
+    # 2.25.0+: SpeechMetadata / VoiceConfig.voice
+    "google-genai>=2.25.0",
+    "python-dotenv>=1.2.3",
+]
