@@ -1,6 +1,6 @@
 # gemini-3.8_Flash_tts
 
-Gemini 3.8 Flash TTS（`gemini-3.8-flash-tts`）でテキストを読み上げ、WAV に保存するテストスクリプト。Gemini API を API キーだけで呼ぶ（Google Cloud 側の設定は不要）。
+Gemini 3.8 Flash TTS（`gemini-3.8-flash-tts`）でテキストを読み上げ、WAV に保存するテストスクリプト。自分の声を録音して、その声で読み上げさせることもできる（[自分の声を作る](#自分の声を作るvoice-replication)）。Gemini API を API キーだけで呼ぶ（Google Cloud 側の設定は不要）。
 
 ## セットアップ
 
@@ -27,9 +27,9 @@ afplay output/hello.wav
 | オプション | 内容 | 既定値 |
 |---|---|---|
 | `--text` | 読み上げる文章（下記のタグも書ける） | `こんにちは、私はgemini 3.8 TTS です。` |
-| `--voice` | 声の名前または ID | `Kore` |
+| `--voice` | 声の名前・ID、または `create_voice.py` で登録した名前（`hong` など） | `Kore` |
 | `--style` | 話し方の指示（英語の短い文） | なし |
-| `-o`, `--out` | 出力ファイル（フォルダがなければ作る） | `output/out.wav` |
+| `-o`, `--out` | 出力ファイル（フォルダがなければ作る） | 登録した名前なら `output/<名前>_<日時>.wav`、それ以外は `output/out.wav` |
 | `--model` | モデル名 | `gemini-3.8-flash-tts` |
 
 出力は WAV（24 kHz / モノラル / 16 bit）。`output/` は git に含めない。言語は自動判定で、日本語に対応している。
@@ -83,7 +83,106 @@ for v in c.voices.list(language_code=["ja-JP"], page_size=200).voices:
 '
 ```
 
-このほか、Voice Design や Voice Replication で作った `voice_...` / `voicekey_...` の ID も指定できる。
+### 3. 自分で作った声
+
+`create_voice.py` で作って登録した名前（`hong` など）を `--voice` に渡す。作り方は次の節。Voice Design や Voice Replication で作った `voice_...` / `voicekey_...` の ID を直接渡してもよい。
+
+## 自分の声を作る（Voice Replication）
+
+自分の声を 2 本録音して API に送ると、自分の声の voice ID（`voice_...`）が発行される。`create_voice.py` はこの ID を名前（例: `hong`）と対応づけて `myvoice/voices.json` に保存するので、以後は `--voice hong` で読み上げられる。
+
+### 1. 録音する
+
+録音ソフトは何でもよい。Mac なら Audacity を Homebrew で入れると、ほかのアプリ（MuseHub）が付いてこない。
+
+```bash
+brew install --cask audacity
+```
+
+本人（成人）が、同じマイク・同じ部屋で、静かで反響の少ない場所で次の 2 本を録る。
+
+| 内容 | 長さ | ファイル名 |
+|---|---|---|
+| 参照音声: 普段どおりの自然な話し声（内容は何でもよい） | 10〜30 秒 | `myvoice/<名前>_<何でも>.wav`（例: `hong_30sec.wav`） |
+| 同意音声: 下の同意文を一字一句そのまま読む | 数秒 | `myvoice/<名前>_approved.wav`（例: `hong_approved.wav`） |
+
+日本語の同意文:
+
+> 私はこの音声の所有者であり、Googleがこの音声を使用して音声合成モデルを作成することを承認します。
+
+- 書き出しは WAV（モノラル・16 bit）。サンプリングレートは 44100 Hz などのままでよい。`create_voice.py` が macOS の `afconvert` で 24 kHz に変換し、`<元の名前>_24k.wav` を作る
+- 参照音声として使えるのは、`myvoice/<名前>_*.wav` のうち、`_approved.wav` と `_24k.wav` 以外の 1 本だけ。2 本以上あるときは `--source` で指定する
+- 音割れ（入力レベルの上げすぎ）とノイズ除去などの加工は避ける
+
+### 2. 声を作る
+
+```bash
+uv run python create_voice.py hong
+```
+
+```
+created hong: voice_xxxxxxxxxxxx (expires 2027-09-26T03:32:17+00:00)
+```
+
+| オプション | 内容 |
+|---|---|
+| `名前` | 登録する名前（`myvoice/<名前>_*.wav` を探す） |
+| `--source` | 参照音声を指定する |
+| `--consent` | 同意音声を指定する |
+| `--replace` | 登録済みの名前で作り直す（新しい声ができてから古い声を削除する） |
+| `--design "説明"` | 録音の代わりに、声の説明文から作る（Voice Design、下記） |
+| `--gender` | Voice Design のときの性別（`female` / `male`） |
+| `--language` | Voice Design のときの言語（既定は `ja-JP`） |
+| `--model` | モデル名（既定は `gemini-3.8-flash-tts`） |
+
+### 3. 読み上げる
+
+```bash
+uv run python tts_test.py --voice hong --text "これは私の声のテストです。"
+afplay output/hong_20260926-123222.wav   # 表示されたファイル名で再生する
+```
+
+`--style` やタグも標準の声と同じように使える。
+
+### 声の一覧と削除
+
+```bash
+cat myvoice/voices.json   # 名前と voice ID の対応
+uv run python -c '
+from dotenv import dotenv_values; from google import genai
+c = genai.Client(api_key=dotenv_values(".env")["GEMINI_API_KEY"], enterprise=False)
+for v in c.voices.list(type_=["replicated", "prompted"]).voices:
+    print(v.id, v.type, v.display_name, v.expire_time, sep=" | ")
+'
+```
+
+削除は `c.voices.delete(id="voice_...")`。削除したら `myvoice/voices.json` からもその名前を消す。
+
+### 声の説明文から作る（Voice Design）
+
+録音の代わりに、英語の 1〜2 文で声を説明して作ることもできる。架空のキャラクター向け。できた声の試聴用音声が `output/<名前>_sample.wav` に保存される。
+
+```bash
+uv run python create_voice.py narrator --gender female \
+  --design "A calm Japanese woman in her 30s with a clear, warm voice and standard Tokyo accent, speaking at a relaxed pace."
+uv run python tts_test.py --voice narrator --text "こんにちは。"
+```
+
+作るたびに違う声になり、特定の声に似せるのは難しい。一度作った声は、同じ ID なら何度読み上げても同じ声になる。
+
+### 注意
+
+- **本人の生の声だけが使える。** AI で作った声（ほかの TTS の出力など）を渡すと、次のエラーで拒否される。SDK は 500 エラーとして表示するが、中身は入力の拒否
+  ```
+  Voice replication failed safety checks.
+  Reference or consent audio contains synthetic speech or AI provenance watermarks (SynthID/C2PA).
+  ```
+- 同意音声の話者が参照音声と違う場合や、同意文が違う場合も拒否される
+- 作った声は 1 年で期限切れになる。1 プロジェクトにつき最大 200 声（Voice Design の声と合わせて）
+- 声を作る料金はドキュメントに載っていない。Voice Design で試したときは、1 回あたり音声出力 400〜1,300 トークン（出力料金で換算して 2 円以下）だった
+- 生成した音声には SynthID の透かしが入る
+- `myvoice/`（録音と `voices.json`）は git に含めない。自分の声と同意音声は悪用されうるので、公開しない
+- AI Studio の画面から声を作る機能は、イリノイ州・テキサス州・EEA・英国・スイス・インドでは使えない
 
 ## `--style` と `--text` 内のタグ
 
@@ -213,6 +312,8 @@ uv run python tts_test.py --text "えっと <short pause> それは <laugh> 知�
   - style とタグの制御: https://ai.google.dev/gemini-api/docs/speech-generation#controllable
   - プロンプトの書き方: https://ai.google.dev/gemini-api/docs/speech-generation#prompting-guide
   - 対応言語: https://ai.google.dev/gemini-api/docs/speech-generation#languages
+- Voice Replication（自分の声を作る）: https://ai.google.dev/gemini-api/docs/voice-replication
+- Voice Design（説明文から声を作る）: https://ai.google.dev/gemini-api/docs/voice-design
 - 課金（前払い / 後払い）: https://ai.google.dev/gemini-api/docs/billing
 - 料金: https://ai.google.dev/gemini-api/docs/pricing
 - Batch API: https://ai.google.dev/gemini-api/docs/batch-api
@@ -226,5 +327,7 @@ uv run python tts_test.py --text "えっと <short pause> それは <laugh> 知�
 ## ファイル
 
 - `tts_test.py`: 読み上げスクリプト本体
+- `create_voice.py`: 自分の声（Voice Replication）や説明文からの声（Voice Design）を作り、名前で登録する
+- `myvoice/`: 録音と `voices.json`（名前と voice ID の対応）を置く。中身は git に含めない
 - `voices-ja-JP.md`: 日本語の声 115 個の一覧
 - `.env.example`: `.env` のひな形

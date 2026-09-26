@@ -10,3 +10,7 @@ __pycache__/
 
 # Generated audio
 output/
+
+# Voice recordings for voice replication (personal biometric data)
+myvoice/*
+!myvoice/.keep

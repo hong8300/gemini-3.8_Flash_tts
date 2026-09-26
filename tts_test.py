@@ -1,14 +1,20 @@
 """Generate a WAV file with Gemini 3.8 Flash TTS (Gemini API)."""
 
 import argparse
+import json
 import sys
 import wave
+from datetime import datetime
 from pathlib import Path
 
 from dotenv import dotenv_values
 from google import genai
 
-ENV_FILE = Path(__file__).resolve().parent / ".env"
+ROOT = Path(__file__).resolve().parent
+ENV_FILE = ROOT / ".env"
+# Speaker name -> replicated voice ID, written by create_voice.py.
+VOICE_DIR = ROOT / "myvoice"
+VOICE_REGISTRY = VOICE_DIR / "voices.json"
 MODEL = "gemini-3.8-flash-tts"
 DEFAULT_TEXT = "こんにちは、私はgemini 3.8 TTS です。"
 
@@ -34,14 +40,24 @@ def load_api_key() -> str | None:
     return (dotenv_values(ENV_FILE).get("GEMINI_API_KEY") or "").strip() or None
 
 
+def load_registry() -> dict:
+    return json.loads(VOICE_REGISTRY.read_text()) if VOICE_REGISTRY.is_file() else {}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--text", default=DEFAULT_TEXT)
-    parser.add_argument("--voice", default="Kore")
+    parser.add_argument("--voice", default="Kore", help="voice name/ID, or a speaker name registered by create_voice.py")
     parser.add_argument("--style", help='delivery direction, e.g. "cheerful and friendly"')
     parser.add_argument("--model", default=MODEL)
-    parser.add_argument("-o", "--out", type=Path, default=Path("output/out.wav"))
+    parser.add_argument("-o", "--out", type=Path, help="default: output/<speaker>_<time>.wav for registered speakers, else output/out.wav")
     args = parser.parse_args()
+
+    registry = load_registry()
+    speaker = args.voice if args.voice in registry else None
+    voice_id = registry[speaker]["id"] if speaker else args.voice
+    if args.out is None:
+        args.out = Path(f"output/{speaker}_{datetime.now():%Y%m%d-%H%M%S}.wav" if speaker else "output/out.wav")
 
     part = {"text": args.text}
     if args.style:
@@ -59,7 +75,7 @@ def main() -> int:
         contents=[{"role": "user", "parts": [part]}],
         config={
             "response_modalities": ["AUDIO"],
-            "speech_config": {"voice_config": {"voice": args.voice}},
+            "speech_config": {"voice_config": {"voice": voice_id}},
         },
     )
 
@@ -76,7 +92,7 @@ def main() -> int:
     with wave.open(str(args.out), "rb") as wf:
         duration = wf.getnframes() / wf.getframerate()
         fmt = f"{wf.getframerate()} Hz, {wf.getnchannels()} ch, {wf.getsampwidth() * 8} bit"
-    print(f"saved {args.out}: {duration:.2f}s, {fmt} (mime={inline.mime_type}, voice={args.voice})")
+    print(f"saved {args.out}: {duration:.2f}s, {fmt} (mime={inline.mime_type}, voice={args.voice}{f' = {voice_id}' if speaker else ''})")
     return 0
 
 
